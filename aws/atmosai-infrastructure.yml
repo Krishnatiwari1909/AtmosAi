@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AtmosAI - Production Cloud Infrastructure (DynamoDB, IAM, SNS, IoT Core & App Runner Execution Role)"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: "production"
+    AllowedValues: ["development", "staging", "production"]
+    Description: "Deployment stage name"
+
+Resources:
+  # ============================================================================
+  # 1. DynamoDB Tables
+  # ============================================================================
+  TelemetryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "AtmosAI-Telemetry"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: "node_id"
+          AttributeType: "S"
+        - AttributeName: "timestamp"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "node_id"
+          KeyType: "HASH"
+        - AttributeName: "timestamp"
+          KeyType: "RANGE"
+      TimeToLiveSpecification:
+        AttributeName: "ttl"
+        Enabled: true
+      Tags:
+        - Key: "Project"
+          Value: "AtmosAI"
+        - Key: "Environment"
+          Value: !Ref EnvironmentName
+
+  ForecastsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "AtmosAI-Forecasts"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: "location_id"
+          AttributeType: "S"
+        - AttributeName: "timestamp"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "location_id"
+          KeyType: "HASH"
+        - AttributeName: "timestamp"
+          KeyType: "RANGE"
+      Tags:
+        - Key: "Project"
+          Value: "AtmosAI"
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "AtmosAI-Alerts"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: "alert_id"
+          AttributeType: "S"
+        - AttributeName: "created_at"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "alert_id"
+          KeyType: "HASH"
+        - AttributeName: "created_at"
+          KeyType: "RANGE"
+      Tags:
+        - Key: "Project"
+          Value: "AtmosAI"
+
+  # ============================================================================
+  # 2. SNS Alert Topic
+  # ============================================================================
+  SurgeAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: "AtmosAI-Surge-Alerts"
+      DisplayName: "AtmosAI Hazardous Pollution Surge Warning"
+      Tags:
+        - Key: "Project"
+          Value: "AtmosAI"
+
+  # ============================================================================
+  # 3. IAM Role for App Runner Backend Execution
+  # ============================================================================
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "AtmosAI-Backend-ExecutionRole-${EnvironmentName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "tasks.apprunner.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "AtmosAIDynamoDBAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:Query"
+                  - "dynamodb:Scan"
+                  - "dynamodb:BatchWriteItem"
+                Resource:
+                  - !GetAtt TelemetryTable.Arn
+                  - !GetAtt ForecastsTable.Arn
+                  - !GetAtt AlertsTable.Arn
+        - PolicyName: "AtmosAIBedrockClaudeAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
+                Resource:
+                  - "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-*"
+                  - "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-*"
+                  - "arn:aws:bedrock:*::foundation-model/anthropic.claude-instant-*"
+        - PolicyName: "AtmosAISNSPublishAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sns:Publish"
+                Resource: !Ref SurgeAlertTopic
+
+  # ============================================================================
+  # 4. IoT Core Topic Rule Role
+  # ============================================================================
+  IoTDynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "AtmosAI-IoTCore-DynamoDBRole-${EnvironmentName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: "iot.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "WriteTelemetryToDynamoDB"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !GetAtt TelemetryTable.Arn
+
+  IoTEnergyTopicRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: "AtmosAI_Ingest_Telemetry"
+      TopicRulePayload:
+        RuleDisabled: false
+        Sql: "SELECT topic(3) as node_id, timestamp, pm25, pm10, temperature, humidity, wind_speed, wind_direction FROM 'atmosai/telemetry/+'"
+        Actions:
+          - DynamoDBv2:
+              RoleArn: !GetAtt IoTDynamoDBRole.Arn
+              PutItem:
+                TableName: !Ref TelemetryTable
+
+Outputs:
+  TelemetryTableName:
+    Description: "DynamoDB table for IoT and Open-Meteo telemetry"
+    Value: !Ref TelemetryTable
+    Export:
+      Name: !Sub "${AWS::StackName}-TelemetryTable"
+
+  ForecastsTableName:
+    Description: "DynamoDB table for 3-hour ML forecast predictions"
+    Value: !Ref ForecastsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ForecastsTable"
+
+  AppRunnerInstanceRoleArn:
+    Description: "Attach this IAM Role to your AWS App Runner service configuration"
+    Value: !GetAtt AppRunnerInstanceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AppRunnerRole"
+
+  SNSTopicArn:
+    Description: "SNS Topic ARN for pollution alerts"
+    Value: !Ref SurgeAlertTopic
