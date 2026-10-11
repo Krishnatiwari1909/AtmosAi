@@ -2,20 +2,8 @@
 import sys
 from pathlib import Path
 
-# Locate Person 3's existing ML repository.
-def _resolve_ml_root():
-    candidates = [
-        Path(__file__).resolve().parents[3] / "ml-team-repo" / "ml",
-        Path(__file__).resolve().parents[2] / "ml-team-repo" / "ml",
-        Path("/app/ml-team-repo/ml"),
-        Path.cwd() / "ml-team-repo" / "ml",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return candidates[0]
-
-ML_ROOT = _resolve_ml_root()
+# Locate Person 3's existing ML repository dynamically
+ML_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "ml-team-repo" / "ml"
 
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))

@@ -1,11 +1,17 @@
 import React from "react";
+import { calculateAQI } from "../../utils/calculateAQI";
 
 export default function AQIGauge({
-  aqi = 142,
+  aqi = 173,
   pm25 = 82,
-  level = "Poor",
-  maxAqi = 300,
+  level = "Moderate",
+  maxAqi = 500,
 }) {
+  // Always compute standard Indian CPCB AQI dynamically from PM2.5 if available
+  const computed = pm25 !== undefined && pm25 !== null ? calculateAQI(pm25) : { aqi, category: level };
+  const displayAqi = computed.aqi;
+  const displayLevel = computed.category;
+
   // Arc calculation: Semi-circle from 180° (left) to 0° (right)
   const radius = 80;
   const strokeWidth = 14;
@@ -15,28 +21,31 @@ export default function AQIGauge({
   // Perimeter of semi-circle: PI * radius
   const arcLength = Math.PI * radius;
 
-  // Fraction of AQI filled (clamped between 0 and 1)
-  const fraction = Math.min(Math.max(aqi / maxAqi, 0.05), 1);
+  // Fraction of AQI filled (clamped between 0 and 1, on 0-500 CPCB scale)
+  const fraction = Math.min(Math.max(displayAqi / maxAqi, 0.05), 1);
   const strokeDashoffset = arcLength * (1 - fraction);
 
-  // Badge colors based on level
+  // Badge colors based on CPCB level
   const getBadgeStyle = (lvl) => {
     switch (lvl?.toLowerCase()) {
       case "good":
         return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      case "satisfactory":
+        return "bg-emerald-100 text-emerald-900 border-emerald-300";
       case "moderate":
         return "bg-amber-100 text-amber-800 border-amber-200";
       case "poor":
         return "bg-orange-100 text-orange-800 border-orange-200";
+      case "very poor":
       case "unhealthy":
         return "bg-rose-100 text-rose-800 border-rose-200";
-      case "very poor":
-      case "very unhealthy":
+      case "severe":
         return "bg-purple-100 text-purple-800 border-purple-200";
       default:
         return "bg-orange-100 text-orange-800 border-orange-200";
     }
   };
+
 
   return (
     <div className="flex flex-col items-center justify-center relative">
@@ -80,17 +89,17 @@ export default function AQIGauge({
         {/* Center content */}
         <div className="absolute top-10 flex flex-col items-center justify-center">
           <span className="text-4xl font-extrabold text-slate-800 tracking-tight leading-none">
-            {aqi}
+            {displayAqi}
           </span>
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
             AQI
           </span>
           <div
             className={`mt-1.5 px-3 py-0.5 rounded-full text-xs font-semibold border ${getBadgeStyle(
-              level
+              displayLevel
             )}`}
           >
-            {level}
+            {displayLevel}
           </div>
         </div>
       </div>

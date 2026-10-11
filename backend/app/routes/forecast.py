@@ -1,168 +1,136 @@
-from typing import Optional
-
+import sys
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
+from app.services.forecast_pipeline import generate_live_forecast
+from app.services.aqi_calculator import calculate_aqi
 
-from app.schemas.forecast import ForecastResponse
-from app.services.prediction import get_mock_forecast
-from app.services.ml_predictor import predict_forecast
-from app.services.forecast_pipeline import (
-    generate_live_forecast,
-    generate_live_forecast_by_coords,
-)
-
-
-# --------------------------------------------------
-# Router configuration
-# --------------------------------------------------
+# Ensure access to the ML team's repository and reload AI guidance service
+ML_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "ml-team-repo" / "ml"
+if str(ML_ROOT) not in sys.path:
+    sys.path.insert(0, str(ML_ROOT))
+import bedrock_service
+from bedrock_service import generate_ai_explanation
 
 router = APIRouter(
     prefix="/forecast",
     tags=["Forecast"],
 )
 
-
-# --------------------------------------------------
-# Mock forecast endpoint
-# GET /api/forecast
-# --------------------------------------------------
-
-@router.get("", response_model=ForecastResponse)
-def get_forecast(
-    location: str = "bengaluru",
-    profile: str = "general",
-):
-    """Return the mock forecast for offline/demo reliability."""
-    return get_mock_forecast(
-        location=location,
-        profile=profile,
-    )
-
-
-# --------------------------------------------------
-# ML prediction endpoint
-# GET /api/forecast/predict
-# --------------------------------------------------
-
-@router.get("/predict")
-def get_ml_forecast(
-    pm25_current: float = Query(..., ge=0),
-    pm25_lag_1h: float = Query(..., ge=0),
-    pm25_lag_3h: float = Query(..., ge=0),
-    pm25_lag_6h: float = Query(..., ge=0),
-    pm25_rolling_mean_6h: float = Query(..., ge=0),
-    temperature: float = Query(...),
-    humidity: float = Query(..., ge=0, le=100),
-    wind_speed: float = Query(..., ge=0),
-    wind_direction: float = Query(..., ge=0, le=360),
-    hour: int = Query(..., ge=0, le=23),
-    day_of_week: int = Query(..., ge=0, le=6),
-    fire_count: int = Query(default=0, ge=0),
-):
-    """Generate a prediction using the team's LightGBM model from raw features."""
-    features = {
-        "pm25_current": pm25_current,
-        "pm25_lag_1h": pm25_lag_1h,
-        "pm25_lag_3h": pm25_lag_3h,
-        "pm25_lag_6h": pm25_lag_6h,
-        "pm25_trend_3h": pm25_current - pm25_lag_3h,
-        "pm25_rolling_mean_6h": pm25_rolling_mean_6h,
-        "temperature": temperature,
-        "humidity": humidity,
-        "wind_speed": wind_speed,
-        "wind_direction": wind_direction,
-        "hour": hour,
-        "is_rush_hour": int(
-            (8 <= hour <= 11) or (17 <= hour <= 21)
-        ),
-        "day_of_week": day_of_week,
-        "is_weekend": int(day_of_week >= 5),
-        "fire_count": fire_count,
-    }
-
-    try:
-        result = predict_forecast(features)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="The ML forecast could not be generated.",
-        ) from exc
-
-    return {
-        **result,
-        "location": "bengaluru",
-        "profile": "general",
-        "prediction_source": "Person 3 LightGBM model",
-        "features_used": features,
-    }
-
-
-# --------------------------------------------------
-# Live telemetry endpoint (supports named location or GPS coordinates)
-# GET /api/forecast/live
-# --------------------------------------------------
-
+@router.get("")
 @router.get("/live")
-async def get_live_forecast(
-    location: Optional[str] = Query(default=None, description="Predefined location ID (e.g. yelahanka, silk_board, delhi)"),
-    lat: Optional[float] = Query(default=None, ge=-90.0, le=90.0, description="Latitude between -90.0 and 90.0"),
-    lon: Optional[float] = Query(default=None, ge=-180.0, le=180.0, description="Longitude between -180.0 and 180.0"),
-    profile: str = Query(default="general", description="Demographic profile identifier"),
+async def get_live_ai_forecast(
+    location: str = Query(default="bengaluru"), 
+    profile: str = Query(default="general"),
+    lat: float = Query(None),
+    lon: float = Query(None),
+    name: str = Query("User"),
+    age: int = Query(25),
+    activity: str = Query("Walking"),
+    health: str = Query("None"),
+    commute: str = Query("Public transit"),
+    gear: str = Query("None")
 ):
-    """
-    Generate a live ML forecast based on real-time Open-Meteo telemetry.
-    Accepts either predefined location string or exact geographic coordinates.
-    """
+    """Fetch live data, run LightGBM inference, and generate Bedrock/Gemini AI advice."""
     if (lat is not None and lon is None) or (lat is None and lon is not None):
         raise HTTPException(
             status_code=400,
             detail="Both 'lat' (-90 to 90) and 'lon' (-180 to 180) must be provided together.",
         )
 
-    try:
-        if lat is not None and lon is not None:
-            result = await generate_live_forecast_by_coords(lat=lat, lon=lon)
-        else:
-            target_location = (location or "bengaluru").lower().strip()
-            result = await generate_live_forecast(target_location)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"The live forecast could not be generated: {exc}",
-        ) from exc
+    if lat is not None and not (-90.0 <= lat <= 90.0):
+        raise HTTPException(status_code=422, detail="Latitude must be between -90.0 and 90.0 degrees.")
 
-    # Enrich with AWS Bedrock / deterministic demographic AI guidance
+    if lon is not None and not (-180.0 <= lon <= 180.0):
+        raise HTTPException(status_code=422, detail="Longitude must be between -180.0 and 180.0 degrees.")
+
+    # Ensure plain values if invoked directly as a Python coroutine
+    name_val = name if isinstance(name, str) else getattr(name, "default", "User")
+    age_val = age if isinstance(age, int) else getattr(age, "default", 25)
+    activity_val = activity if isinstance(activity, str) else getattr(activity, "default", "Walking")
+    health_val = health if isinstance(health, str) else getattr(health, "default", "None")
+    commute_val = commute if isinstance(commute, str) else getattr(commute, "default", "Public transit")
+    gear_val = gear if isinstance(gear, str) else getattr(gear, "default", "None")
+
     try:
-        from bedrock_service import generate_ai_explanation
-        features_used = result.get("features_used", {})
-        display_name = result.get("location") or (location.replace("_", " ").title() if location else "Bengaluru")
-        explanation = generate_ai_explanation({
-            "location": display_name,
+        # 1. Run LightGBM Inference Pipeline
+        target_loc = location or "bengaluru"
+        ml_data = await generate_live_forecast(target_loc, lat, lon)
+        
+        # 2. Run AI Guidance (Gemini 2.5 Flash)
+        bedrock_input = {
+            "name": name_val,
+            "age": age_val,
+            "activities": activity_val,
+            "sensitivities": health_val,
+            "commute": commute_val,
+            "mitigation": gear_val,
+            "risk": ml_data["risk"],
+            "forecast_window": ml_data.get("forecast_window", "Next 3 Hours"),
+            "predicted_pm25": ml_data["predicted_pm25"],
+            "current_pm25": ml_data["features_used"]["pm25_current"],
+            "wind_speed": ml_data["features_used"]["wind_speed"]
+        }
+        ai_data = generate_ai_explanation(bedrock_input)
+        
+        current_pm = ml_data["features_used"]["pm25_current"]
+        predicted_pm = ml_data["predicted_pm25"]
+        now_aqi = calculate_aqi(current_pm)
+        pred_aqi = calculate_aqi(predicted_pm)
+        
+        is_custom = lat is not None and lon is not None
+
+        return {
+            "risk": ml_data["risk"],
+            "risk_level": ml_data["risk"],
+            "summary": ai_data["summary"],
+            "predicted_pm25": predicted_pm,
+            "location": ml_data.get("location") or target_loc,
             "profile": profile,
-            "risk": result.get("risk", "MODERATE"),
-            "forecast_window": result.get("forecast_window", "18:00-21:00"),
-            "predicted_pm25": result.get("predicted_pm25", 80),
-            "wind_speed": features_used.get("wind_speed", 2.0),
-        })
-        result["explanation"] = explanation
-    except Exception:
-        result["explanation"] = None
+            "is_custom_coordinates": is_custom,
+            "coordinates": {"lat": round(lat, 5), "lon": round(lon, 5)} if is_custom else None,
+            "telemetry_source": ml_data.get("telemetry_source", "Open-Meteo"),
+            "features_used": ml_data["features_used"],
+            "current_observations": {
+                "pm25": current_pm,
+                "pm10": ml_data["features_used"].get("pm10"),
+                "temperature": ml_data["features_used"].get("temperature"),
+                "humidity": ml_data["features_used"].get("humidity"),
+                "wind_speed": ml_data["features_used"].get("wind_speed"),
+                "wind_direction": ml_data["features_used"].get("wind_direction"),
+            },
+            "points": [
+                {"label": "Now", "pm25": current_pm, "aqi": now_aqi["aqi"], "level": now_aqi["category"]},
+                {"label": "+3h", "pm25": predicted_pm, "aqi": pred_aqi["aqi"], "level": pred_aqi["category"]}
+            ],
+            "explanation": ai_data,
+            "factors": [
+                {"title": "Wind Speed", "description": f"{ml_data['features_used']['wind_speed']} m/s", "icon": "wind"},
+                {"title": "Humidity", "description": f"{ml_data['features_used']['humidity']}%", "icon": "humidity"},
+                {"title": "Traffic Trends", "description": "High commute volume detected" if ml_data["features_used"].get("is_rush_hour") else "Normal traffic conditions", "icon": "traffic"}
+            ],
+            "recommended_action": ai_data["action"]
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
-    result["profile"] = profile
-    return result
-
-
-# --------------------------------------------------
-# Dedicated coordinate-based forecast endpoint
-# GET /api/forecast/live-coords
-# --------------------------------------------------
 
 @router.get("/live-coords")
 async def get_live_forecast_by_coords_endpoint(
     lat: float = Query(..., ge=-90.0, le=90.0, description="Latitude between -90.0 and 90.0"),
     lon: float = Query(..., ge=-180.0, le=180.0, description="Longitude between -180.0 and 180.0"),
     profile: str = Query(default="general", description="Demographic profile identifier"),
+    name: str = Query("User"),
+    age: int = Query(25),
+    activity: str = Query("Walking"),
+    health: str = Query("None"),
+    commute: str = Query("Public transit"),
+    gear: str = Query("None")
 ):
-    """
-    Generate a live ML forecast for explicit geographic coordinates.
-    """
-    return await get_live_forecast(location=None, lat=lat, lon=lon, profile=profile)
+    """Generate a live ML forecast for explicit geographic coordinates."""
+    return await get_live_ai_forecast(
+        location=None, profile=profile, lat=lat, lon=lon,
+        name=name, age=age, activity=activity, health=health, commute=commute, gear=gear
+    )
+

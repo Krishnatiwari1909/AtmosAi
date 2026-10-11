@@ -5,7 +5,47 @@ import {
   MOCK_ALERTS,
   generateHistoricalObservations,
 } from "../data/mockData";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+
+// Local stale-while-revalidate offline caching utilities (15 min TTL)
+export const FORECAST_CACHE_TTL_MS = 15 * 60 * 1000;
+
+export function getCachedData(key, maxAgeMs = null) {
+  try {
+    const raw = localStorage.getItem(`atmos_cache_${key}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.data) {
+        if (maxAgeMs !== null) {
+          const age = Date.now() - (parsed.timestampMs || 0);
+          if (age > maxAgeMs) {
+            return null; // Expired
+          }
+        }
+        return parsed;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+export function setCachedData(key, data) {
+  try {
+    localStorage.setItem(
+      `atmos_cache_${key}`,
+      JSON.stringify({
+        data,
+        timestampMs: Date.now(),
+        timestamp: new Date().toLocaleTimeString(),
+      })
+    );
+  } catch (e) {
+    // ignore
+  }
+}
 
 export async function fetchHealth() {
   try {
@@ -24,62 +64,136 @@ export async function fetchHealth() {
 }
 
 export async function fetchLocations() {
+  const cacheKey = "locations";
   try {
     const res = await fetch(`${API_BASE}/api/locations`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error("Locations request failed");
     const data = await res.json();
-    return data.locations || MOCK_LOCATIONS;
+    const result = data.locations || MOCK_LOCATIONS;
+    setCachedData(cacheKey, result);
+    return result;
   } catch {
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) return cached.data;
     return MOCK_LOCATIONS;
   }
 }
 
 export async function fetchProfiles() {
+  const cacheKey = "profiles";
   try {
     const res = await fetch(`${API_BASE}/api/profiles`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error("Profiles request failed");
     const data = await res.json();
-    return data.profiles || MOCK_PROFILES;
+    const result = data.profiles || MOCK_PROFILES;
+    setCachedData(cacheKey, result);
+    return result;
   } catch {
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) return cached.data;
     return MOCK_PROFILES;
   }
 }
 
 export async function fetchAlerts() {
+  const cacheKey = "alerts";
   try {
     const res = await fetch(`${API_BASE}/api/alerts`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error("Alerts request failed");
     const data = await res.json();
-    return data.alerts || MOCK_ALERTS;
+    const result = data.alerts || MOCK_ALERTS;
+    setCachedData(cacheKey, result);
+    return result;
   } catch {
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) return cached.data;
     return MOCK_ALERTS;
   }
 }
 
 export async function fetchAccuracy() {
+  const cacheKey = "accuracy";
   try {
     const res = await fetch(`${API_BASE}/api/accuracy`, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) throw new Error("Accuracy request failed");
     const data = await res.json();
-    return data.metrics || MOCK_ACCURACY;
+    const result = data.metrics || MOCK_ACCURACY;
+    setCachedData(cacheKey, result);
+    return result;
   } catch {
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) return cached.data;
     return MOCK_ACCURACY;
   }
 }
 
-export async function fetchLiveForecast(location = "yelahanka", profile = "general", signal = null) {
+/**
+ * Helper to extract stored user profile fields from localStorage ('atmosai_user_profile')
+ * to pass to the backend and Gemini 2.5 LLM guidance engine.
+ */
+export function getStoredUserProfileParams() {
+  try {
+    const raw = localStorage.getItem("atmosai_user_profile");
+    if (raw) {
+      const p = JSON.parse(raw);
+      const details = p.details || {};
+      const sensitivities = p.healthSafeguards || details.sensitivities || [];
+      const healthStr = Array.isArray(sensitivities) && sensitivities.length > 0 ? sensitivities.join(", ") : "None";
+      const gearStr = details.maskType || "None";
+      const commuteStr = p.role === "delivery_rider" ? "Two-wheeler" : p.role === "office_commuter" ? "Metro/Cab" : "Walking";
+      return {
+        name: p.name || "User",
+        activity: p.roleName || p.role || "Walking",
+        health: healthStr,
+        gear: gearStr,
+        commute: commuteStr,
+      };
+    }
+  } catch {}
+  return {};
+}
+
+export async function fetchLiveForecast(location = "yelahanka", profile = "general", signal = null, forceRefresh = false) {
+  const userParams = getStoredUserProfileParams();
+  const profileKey = `${userParams.name || ""}_${userParams.activity || ""}_${userParams.health || ""}`;
+  const cacheKey = `forecast_${location}_${profile}_${encodeURIComponent(profileKey)}`;
+
+  // 15-minute client-side caching: if not forceRefresh and fresh data is available, return immediately!
+  if (!forceRefresh) {
+    const cachedFresh = getCachedData(cacheKey, FORECAST_CACHE_TTL_MS);
+    if (cachedFresh?.data) {
+      return cachedFresh.data;
+    }
+  }
+
   try {
     const fetchOptions = signal ? { signal } : { signal: AbortSignal.timeout(8000) };
+    const queryParams = new URLSearchParams({
+      location: location,
+      profile: profile,
+      ...(userParams.name ? { name: userParams.name } : {}),
+      ...(userParams.activity ? { activity: userParams.activity } : {}),
+      ...(userParams.health ? { health: userParams.health } : {}),
+      ...(userParams.gear ? { gear: userParams.gear } : {}),
+      ...(userParams.commute ? { commute: userParams.commute } : {}),
+    });
     const res = await fetch(
-      `${API_BASE}/api/forecast/live?location=${encodeURIComponent(location)}&profile=${encodeURIComponent(profile)}`,
+      `${API_BASE}/api/forecast/live?${queryParams.toString()}`,
       fetchOptions
     );
     if (!res.ok) throw new Error(`Live forecast failed (HTTP ${res.status})`);
     const data = await res.json();
+    setCachedData(cacheKey, data);
     return data;
   } catch (err) {
     if (err.name === "AbortError") throw err;
-    console.warn("Falling back to local generated live forecast:", err.message);
+    console.warn("Falling back to cached/local live forecast:", err.message);
+
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) {
+      return cached.data;
+    }
+
     const mockObs = generateHistoricalObservations(
       location === "peenya" ? 85 : location === "silk_board" ? 92 : 38
     );
@@ -137,16 +251,11 @@ export async function fetchLiveForecast(location = "yelahanka", profile = "gener
 
 /**
  * Fetch live coordinate-based air quality forecast from Open-Meteo telemetry & LightGBM model.
- * @param {number|string} lat - Latitude (-90 to 90)
- * @param {number|string} lon - Longitude (-180 to 180)
- * @param {string} profile - Persona / demographic profile (e.g. 'runner', 'general', 'parent')
- * @param {AbortSignal|null} signal - Optional abort signal for request cancellation
  */
-export async function fetchLiveForecastByCoords(lat, lon, profile = "general", signal = null) {
+export async function fetchLiveForecastByCoords(lat, lon, profile = "general", signal = null, forceRefresh = false) {
   const parsedLat = Number(lat);
   const parsedLon = Number(lon);
 
-  // Validate coordinates
   if (Number.isNaN(parsedLat) || parsedLat < -90 || parsedLat > 90) {
     throw new Error(`Invalid latitude value: ${lat}. Must be between -90 and 90.`);
   }
@@ -154,10 +263,27 @@ export async function fetchLiveForecastByCoords(lat, lon, profile = "general", s
     throw new Error(`Invalid longitude value: ${lon}. Must be between -180 and 180.`);
   }
 
+  const userParams = getStoredUserProfileParams();
+  const profileKey = `${userParams.name || ""}_${userParams.activity || ""}_${userParams.health || ""}`;
+  const cacheKey = `forecast_coords_${parsedLat.toFixed(2)}_${parsedLon.toFixed(2)}_${profile}_${encodeURIComponent(profileKey)}`;
+
+  // 15-minute client-side caching: if not forceRefresh and fresh data is available, return immediately!
+  if (!forceRefresh) {
+    const cachedFresh = getCachedData(cacheKey, FORECAST_CACHE_TTL_MS);
+    if (cachedFresh?.data) {
+      return cachedFresh.data;
+    }
+  }
+
   const params = new URLSearchParams({
     lat: parsedLat.toFixed(5),
     lon: parsedLon.toFixed(5),
     profile: profile || "general",
+    ...(userParams.name ? { name: userParams.name } : {}),
+    ...(userParams.activity ? { activity: userParams.activity } : {}),
+    ...(userParams.health ? { health: userParams.health } : {}),
+    ...(userParams.gear ? { gear: userParams.gear } : {}),
+    ...(userParams.commute ? { commute: userParams.commute } : {}),
   });
 
   const fetchOptions = signal ? { signal } : { signal: AbortSignal.timeout(10000) };
@@ -177,24 +303,35 @@ export async function fetchLiveForecastByCoords(lat, lon, profile = "general", s
     }
 
     const data = await res.json();
+    setCachedData(cacheKey, data);
     return data;
   } catch (err) {
     if (err.name === "AbortError") throw err;
     console.error("Live coordinate forecast error:", err);
+
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) {
+      return cached.data;
+    }
     throw err;
   }
 }
 
 export async function fetchLiveTelemetry(location = "yelahanka") {
+  const cacheKey = `telemetry_${location}`;
   try {
     const res = await fetch(
       `${API_BASE}/api/telemetry/live?location=${encodeURIComponent(location)}`,
       { signal: AbortSignal.timeout(8000) }
     );
     if (!res.ok) throw new Error("Live telemetry failed");
-    return await res.json();
+    const data = await res.json();
+    setCachedData(cacheKey, data);
+    return data;
   } catch (err) {
     console.warn("Live telemetry fallback:", err.message);
+    const cached = getCachedData(cacheKey);
+    if (cached?.data) return cached.data;
     return null;
   }
 }
@@ -273,4 +410,74 @@ export async function fetchTelemetryHistory(nodeId, limit = 20) {
       error: err.message,
     };
   }
+}
+
+/**
+ * Synchronize user demographic profile to localStorage ('atmosai_user_profile')
+ * and AWS DynamoDB via backend /api/profile
+ */
+export async function syncUserProfile(profileData) {
+  // 1. Immediately persist to localStorage 'atmosai_user_profile'
+  try {
+    localStorage.setItem("atmosai_user_profile", JSON.stringify(profileData));
+  } catch (e) {
+    console.warn("Failed saving profile to localStorage:", e);
+  }
+
+  // 2. Synchronize with backend /api/profile
+  try {
+    const payload = {
+      user_id: profileData.id || profileData.user_id || "guest_123",
+      name: profileData.name || "User",
+      age: String(profileData.details?.ageGroup || profileData.age || "25"),
+      activities: Array.isArray(profileData.activities)
+        ? profileData.activities
+        : [profileData.role || "General"],
+      sensitivities: profileData.details?.sensitivities || profileData.sensitivities || [],
+      commute: profileData.details?.commute || profileData.commute || "Public transit",
+      gear: profileData.details?.maskType ? [profileData.details.maskType] : (profileData.gear || []),
+    };
+
+    const res = await fetch(`${API_BASE}/api/profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("Backend profile sync offline, persisted in localStorage:", err.message);
+  }
+
+  return {
+    status: "success",
+    dynamodb_synced: false,
+    message: "Saved to LocalStorage ('atmosai_user_profile')",
+  };
+}
+
+export async function fetchUserProfile(userId = "guest_123") {
+  try {
+    const res = await fetch(`${API_BASE}/api/profile/${userId}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.data) {
+        localStorage.setItem("atmosai_user_profile", JSON.stringify(data.data));
+        return data.data;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed fetching profile from backend, using local cache:", err.message);
+  }
+
+  try {
+    const stored = localStorage.getItem("atmosai_user_profile");
+    if (stored) return JSON.parse(stored);
+  } catch (e) {}
+
+  return null;
 }

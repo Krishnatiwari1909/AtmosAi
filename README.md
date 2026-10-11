@@ -38,60 +38,30 @@ AtmosAi/
 │   └── simulator/
 │       └── sensor_simulator.py # MQTT IoT data broadcast script (Dry-run capable)
 │
-└── frontend/                 # React 19 + Vite + Tailwind CSS early-warning dashboard
-    ├── src/
-    │   ├── api/              # atmosApi.js (FastAPI endpoints integration)
-    │   ├── components/       # MetricCards, AIExplanationCard, ForecastChart, NodeNetwork, etc.
-    │   ├── data/             # mockData.js (High-fidelity telemetry fallbacks)
-    │   ├── App.jsx           # Main reactive dashboard
-    │   └── index.css         # Tailwind v4 atmospheric styling
-    └── vite.config.js        # Vite dev server with proxy to backend :8000
+└── frontend/
 ```          
+⚙️ Getting Started
+1. Run the Backend API
+Navigate to the backend directory and start the FastAPI server:
 
-## ⚙️ Getting Started
-
-### 1. Run the Backend API
-Navigate to the `backend` directory and start the FastAPI server:
-
-```bash
+Bash
 cd backend
-# Create and activate environment, or install dependencies:
-uv venv .venv
-uv pip install -r requirements.txt
-# Run the FastAPI server:
-.venv\Scripts\uvicorn app.main:app --reload --port 8000
-```
-The API will be available at `http://localhost:8000`. View the Swagger documentation at `http://localhost:8000/docs`.
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+The API will be available at http://localhost:8000. View the Swagger documentation at http://localhost:8000/docs.
 
-### 2. Run the Frontend Dashboard
-Navigate to the `frontend` directory and launch the Vite development server:
+2. AWS Credentials (For Bedrock AI)
+To enable the Claude 3.5 Sonnet explanations, ensure your local environment has AWS credentials configured:
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open `http://localhost:5173` in your browser to interact with the AtmosAi early-warning intelligence dashboard.
-
-### 3. AWS Credentials (For Bedrock AI)
-To enable the Claude 3.5 / Sonnet 5 explanations, ensure your local environment has AWS credentials configured:
-
-```bash
+Bash
 export AWS_ACCESS_KEY_ID="your_access_key"
 export AWS_SECRET_ACCESS_KEY="your_secret_key"
 export AWS_DEFAULT_REGION="us-east-1"
-```
-
-*(Note: Deterministic guardrail safety templates automatically activate if AWS credentials are not configured, guaranteeing flawless offline/demo functionality).*
-
-### 4. Run the IoT Simulator
+3. Run the IoT Simulator
 To simulate live hardware sensors broadcasting localized Bengaluru telemetry:
 
-```bash
+Bash
 cd ml-team-repo
 python simulator/sensor_simulator.py
-```
-
-## 👥 Team TechinX
-* **AWS Environmental Hacks 2026**
->>>>>>> 863cf5a (feat: current location forecast, Dockerfile, and AWS production infrastructure)
+👥 Team TechinX
+Krishna: 

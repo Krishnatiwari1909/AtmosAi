@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { syncUserProfile } from "../api/atmosApi";
 
 const STORAGE_KEY = "atmosai_user_session_v2";
+const PROFILE_STORAGE_KEY = "atmosai_user_profile";
 
 export const PRESET_PERSONAS = {
   runner: {
@@ -126,25 +128,60 @@ export const PRESET_PERSONAS = {
   },
 };
 
+export const DEFAULT_USER_PROFILE = {
+  id: "usr_atmosai_01",
+  name: "AtmosAi User",
+  email: "user@atmosai.org",
+  role: "runner",
+  roleName: "Runner / Athlete",
+  avatar: "🏃",
+  dailyOutdoorTime: 2.5,
+  healthSafeguards: ["Dust & Pollen Allergy"],
+  location: "Bengaluru",
+  baseLocation: "Bengaluru",
+  emergencyContact: {
+    name: "Emergency Medical Contact",
+    phone: "+91 98450 00000",
+    relation: "Family/Doctor",
+  },
+  details: {
+    ageGroup: "25-34",
+    baseLocation: "Bengaluru",
+    location: "Bengaluru",
+    dailyOutdoorHours: 2.5,
+    dailyOutdoorTime: 2.5,
+    sensitivities: ["Dust & Pollen Allergy"],
+    healthSafeguards: ["Dust & Pollen Allergy"],
+    alertThreshold: "moderate",
+    maskType: "Sport Anti-Pollution Mask",
+    emergencyContact: {
+      name: "Emergency Medical Contact",
+      phone: "+91 98450 00000",
+      relation: "Family/Doctor",
+    },
+    hasPurifierAtHome: true,
+    inhalerRequired: false,
+  },
+};
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(PROFILE_STORAGE_KEY) || localStorage.getItem(STORAGE_KEY);
       if (stored) {
         return JSON.parse(stored);
       }
     } catch {
       // ignore
     }
-    // By default unauthenticated for proper first-time login & onboarding flow
-    return null;
+    return DEFAULT_USER_PROFILE;
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(PROFILE_STORAGE_KEY) || localStorage.getItem(STORAGE_KEY);
       return Boolean(stored);
     } catch {
       return false;
@@ -153,18 +190,23 @@ export function AuthProvider({ children }) {
 
   const [isGuest, setIsGuest] = useState(false);
 
-  // Sync to localStorage
+  // Sync directly to localStorage ('atmosai_user_profile') and debounced backend /api/profile
   useEffect(() => {
+    if (!user) return;
     try {
-      if (user && isAuthenticated) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-      } else if (!isAuthenticated && !isGuest) {
-        localStorage.removeItem(STORAGE_KEY);
-      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(user));
     } catch (e) {
       console.error("Failed saving session", e);
     }
-  }, [user, isAuthenticated, isGuest]);
+
+    // Debounce backend sync by 1000ms to avoid flooding the API while typing or clicking
+    const timer = setTimeout(() => {
+      syncUserProfile(user).catch((e) => console.warn("Background sync error:", e));
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [user]);
 
   const login = async (email, password) => {
     await new Promise((resolve) => setTimeout(resolve, 400));
@@ -296,24 +338,30 @@ export function AuthProvider({ children }) {
 
   const updateProfile = (updatedFields) => {
     setUser((prev) => {
+      const base = prev || DEFAULT_USER_PROFILE;
       const updated = {
-        ...prev,
+        ...base,
         ...updatedFields,
         details: {
-          ...(prev?.details || {}),
+          ...(base?.details || {}),
           ...(updatedFields?.details || {}),
         },
       };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
       return updated;
     });
   };
 
   const logout = () => {
-    setUser(null);
+    setUser(DEFAULT_USER_PROFILE);
     setIsAuthenticated(false);
     setIsGuest(false);
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(PROFILE_STORAGE_KEY);
     } catch {}
   };
 
@@ -321,6 +369,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider
       value={{
         user,
+        setUser,
         isAuthenticated,
         isGuest,
         login,

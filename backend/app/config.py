@@ -2,11 +2,13 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+import os
+
 class Settings(BaseSettings):
     app_name: str = "AtmosAI Backend"
     environment: str = "development"
 
-    aws_region: str = "ap-south-1"
+    aws_region: str = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1"
 
     dynamodb_telemetry_table: str = "AtmosAI-Telemetry"
     dynamodb_forecast_table: str = "AtmosAI-Forecasts"

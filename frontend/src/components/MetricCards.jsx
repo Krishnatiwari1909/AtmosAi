@@ -1,4 +1,3 @@
-import React from "react";
 import {
   Activity,
   TrendingUp,
@@ -12,14 +11,16 @@ import {
   Compass,
   Flame,
 } from "lucide-react";
+import { calculateAQI } from "../utils/calculateAQI";
 
 function getAqiCategory(pm25) {
-  if (pm25 <= 30) return { label: "Good", color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" };
-  if (pm25 <= 60) return { label: "Satisfactory", color: "text-teal-400", bg: "bg-teal-500/10", border: "border-teal-500/20" };
-  if (pm25 <= 90) return { label: "Moderate", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" };
-  if (pm25 <= 120) return { label: "Poor", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20" };
-  if (pm25 <= 250) return { label: "Very Poor", color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" };
-  return { label: "Severe", color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" };
+  const { aqi, category } = calculateAQI(pm25);
+  if (aqi <= 50) return { label: "Good", aqi, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" };
+  if (aqi <= 100) return { label: "Satisfactory", aqi, color: "text-teal-400", bg: "bg-teal-500/10", border: "border-teal-500/20" };
+  if (aqi <= 200) return { label: "Moderate", aqi, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" };
+  if (aqi <= 300) return { label: "Poor", aqi, color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20" };
+  if (aqi <= 400) return { label: "Very Poor", aqi, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" };
+  return { label: "Severe", aqi, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" };
 }
 
 export default function MetricCards({ forecast, telemetry }) {

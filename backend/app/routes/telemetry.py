@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services.dynamodb import get_telemetry_table
+from app.services.aqi_calculator import calculate_aqi
 
 
 router = APIRouter(
@@ -131,8 +132,7 @@ def get_telemetry(
         "source": "memory_buffer"
     }
 # Connect to Person 3's ML repository ingestion module.
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ML_ROOT = REPO_ROOT / "ml-team-repo" / "ml"
+ML_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "ml-team-repo" / "ml"
 
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
@@ -143,21 +143,31 @@ from ingest import fetch_current_telemetry
 @router.get("/live")
 async def get_live_telemetry(
     location: str = Query(default="yelahanka"),
+    lat: float = Query(None),
+    lon: float = Query(None)
 ):
     """Fetch current air-quality and weather data."""
 
-    from ingest import LOCATIONS
-    allowed_locations = set(LOCATIONS.keys())
+    allowed_locations = {"peenya", "silk_board", "yelahanka"}
 
-    if location not in allowed_locations:
+    if lat is None and lon is None and location not in allowed_locations:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported location. Choose from: {sorted(allowed_locations)}",
         )
 
-    data = await fetch_current_telemetry(location)
+    data = await fetch_current_telemetry(location, lat, lon)
+
+    pm25 = data.get("pm25", 0.0)
+    aqi_res = calculate_aqi(pm25)
+    aqi = aqi_res["aqi"]
+    category = aqi_res["category"]
 
     return {
         "location": location,
+        "pm25": pm25,
+        "aqi": aqi,
+        "category": category,
+        "updated_at": "Just now",
         **data,
     }

@@ -1,5 +1,7 @@
 // Mock fallbacks ensuring 100% resilient UI during backend restarts or offline demos
 
+import { calculateAQI } from "../utils/calculateAQI";
+
 export const MOCK_LOCATIONS = [
   {
     id: "bengaluru",
@@ -263,18 +265,18 @@ export const MOCK_PROFILES = [
 export const MOCK_FORECAST_DATA = {
   location: "Bengaluru",
   profile: "runner",
-  currentAqi: 142,
+  currentAqi: 173,
   currentPm25: 82,
-  currentLevel: "Poor",
+  currentLevel: "Moderate",
   updatedTime: "12 min ago",
   riskLevel: "High Risk",
   riskDescription: "Air quality is likely to worsen over the next 3 hours.",
   riskWindow: "6:00 PM to 9:00 PM",
   projectionTimeline: [
-    { time: "Now", pm25: 82, aqi: 142, level: "Poor", color: "#F97316", dotColor: "bg-blue-500" },
-    { time: "+1h", pm25: 96, aqi: 160, level: "Poor", color: "#F97316", dotColor: "bg-amber-500" },
-    { time: "+2h", pm25: 118, aqi: 185, level: "Unhealthy", color: "#EF4444", dotColor: "bg-orange-500" },
-    { time: "+3h", pm25: 137, aqi: 210, level: "Unhealthy", color: "#EF4444", dotColor: "bg-red-500" },
+    { time: "Now", pm25: 82, aqi: 173, level: "Moderate", color: "#EAB308", dotColor: "bg-amber-500" },
+    { time: "+1h", pm25: 96, aqi: 218, level: "Poor", color: "#F97316", dotColor: "bg-orange-500" },
+    { time: "+2h", pm25: 118, aqi: 293, level: "Poor", color: "#F97316", dotColor: "bg-orange-500" },
+    { time: "+3h", pm25: 137, aqi: 313, level: "Very Poor", color: "#EF4444", dotColor: "bg-rose-500" },
   ],
   pollutants: {
     pm25: 82,
@@ -430,18 +432,62 @@ export const MOCK_NOTIFICATION_SETTINGS = {
 };
 
 export function getAqiAndLevel(pm25) {
-  const p = Math.max(0, Number(pm25) || 0);
-  if (p <= 12.0) {
-    return { aqi: Math.round((50 / 12.0) * p), level: "Good", color: "bg-emerald-500", textClass: "text-emerald-700", bgClass: "bg-emerald-50/80", borderClass: "border-emerald-100", dotColor: "bg-emerald-500" };
-  } else if (p <= 35.4) {
-    return { aqi: Math.round(51 + ((100 - 51) / (35.4 - 12.1)) * (p - 12.1)), level: "Moderate", color: "bg-amber-500", textClass: "text-amber-700", bgClass: "bg-amber-50/80", borderClass: "border-amber-100", dotColor: "bg-amber-500" };
-  } else if (p <= 55.4) {
-    return { aqi: Math.round(101 + ((150 - 101) / (55.4 - 35.5)) * (p - 35.5)), level: "Poor", color: "bg-orange-500", textClass: "text-orange-700", bgClass: "bg-orange-50/80", borderClass: "border-orange-100", dotColor: "bg-orange-500" };
-  } else if (p <= 150.4) {
-    return { aqi: Math.round(151 + ((200 - 151) / (150.4 - 55.5)) * (p - 55.5)), level: "Unhealthy", color: "bg-rose-500", textClass: "text-rose-700", bgClass: "bg-rose-50/80", borderClass: "border-rose-100", dotColor: "bg-rose-500" };
-  } else {
-    return { aqi: Math.round(201 + ((300 - 201) / (250.4 - 150.5)) * (p - 150.5)), level: "Very Poor", color: "bg-purple-500", textClass: "text-purple-700", bgClass: "bg-purple-50/80", borderClass: "border-purple-100", dotColor: "bg-purple-500" };
+  const { aqi, category } = calculateAQI(pm25);
+  
+  let color = "bg-emerald-500";
+  let textClass = "text-emerald-700";
+  let bgClass = "bg-emerald-50/80";
+  let borderClass = "border-emerald-100";
+  let dotColor = "bg-emerald-500";
+
+  switch (category) {
+    case "Good":
+      color = "bg-emerald-500";
+      textClass = "text-emerald-700";
+      bgClass = "bg-emerald-50/80";
+      borderClass = "border-emerald-100";
+      dotColor = "bg-emerald-500";
+      break;
+    case "Satisfactory":
+      color = "bg-emerald-400";
+      textClass = "text-emerald-800";
+      bgClass = "bg-emerald-50/80";
+      borderClass = "border-emerald-100";
+      dotColor = "bg-emerald-400";
+      break;
+    case "Moderate":
+      color = "bg-amber-500";
+      textClass = "text-amber-700";
+      bgClass = "bg-amber-50/80";
+      borderClass = "border-amber-100";
+      dotColor = "bg-amber-500";
+      break;
+    case "Poor":
+      color = "bg-orange-500";
+      textClass = "text-orange-700";
+      bgClass = "bg-orange-50/80";
+      borderClass = "border-orange-100";
+      dotColor = "bg-orange-500";
+      break;
+    case "Very Poor":
+      color = "bg-rose-500";
+      textClass = "text-rose-700";
+      bgClass = "bg-rose-50/80";
+      borderClass = "border-rose-100";
+      dotColor = "bg-rose-500";
+      break;
+    case "Severe":
+      color = "bg-purple-600";
+      textClass = "text-purple-800";
+      bgClass = "bg-purple-50/80";
+      borderClass = "border-purple-100";
+      dotColor = "bg-purple-600";
+      break;
+    default:
+      break;
   }
+
+  return { aqi, level: category, color, textClass, bgClass, borderClass, dotColor };
 }
 
 export function generateHistoricalObservations(currentPm25 = 45.0) {

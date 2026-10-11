@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
 
 @layer base {
   :root {
@@ -36,33 +37,36 @@
   border: 1px solid rgba(226, 232, 240, 0.8);
 }
 
-/* Mobile device container preview for desktop */
+/* Mobile device container preview for desktop presentation */
 .mobile-device-frame {
   width: 100%;
   max-width: 425px;
   min-height: 850px;
   background-color: #f8fafc;
-  border-radius: 2.75rem;
-  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 12px #0f172a, 0 0 0 14px #334155;
+  border-radius: 2.5rem;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
   overflow: hidden;
   position: relative;
   display: flex;
   flex-direction: column;
 }
 
+/* On real phones or tablets, expand cleanly to fill 100% of viewport */
+@media (max-width: 640px) {
+  .mobile-device-frame {
+    max-width: 100% !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
+
 /* Animations */
 @keyframes pulse-subtle {
-
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.9;
-  }
-
-  50% {
-    transform: scale(1.08);
-    opacity: 0.5;
-  }
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.08); opacity: 0.5; }
 }
 
 .animate-pulse-subtle {
@@ -73,7 +77,6 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
-
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;

@@ -10,9 +10,13 @@ import {
   Navigation,
   AlertCircle,
   ShieldCheck,
+  Bot,
+  Footprints,
 } from "lucide-react";
 import AQIGauge from "../ui/AQIGauge";
 import SkylineSvg from "../ui/SkylineSvg";
+import { calculateAQI } from "../../utils/calculateAQI";
+import { useAuth } from "../../context/AuthContext";
 
 export default function HomeScreen({
   location = "Bengaluru",
@@ -31,9 +35,25 @@ export default function HomeScreen({
   forecastError = null,
   onRetryForecast = null,
 }) {
-  const currentAqi = forecastData?.currentAqi || 142;
+  const { user } = useAuth() || {};
+
+  // Read stored user profile from localStorage ('atmosai_user_profile')
+  const userProfile = (() => {
+    try {
+      const raw = localStorage.getItem("atmosai_user_profile");
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return null;
+  })();
+
+  const activeUserName = userProfile?.name || user?.name || "You";
+  const activeSensitivities = userProfile?.healthSafeguards || userProfile?.details?.sensitivities || [];
+  const primarySafeguard = activeSensitivities[0] || (userProfile?.roleName || "Health Shield Active");
+
   const currentPm25 = forecastData?.currentPm25 || 82;
-  const currentLevel = forecastData?.currentLevel || "Poor";
+  const cpcbAqiData = calculateAQI(currentPm25);
+  const currentAqi = cpcbAqiData.aqi;
+  const currentLevel = cpcbAqiData.category;
   const updatedTime = forecastData?.updatedTime || "Updated 12 min ago";
 
   const timeline = forecastData?.projectionTimeline || [
@@ -62,6 +82,62 @@ export default function HomeScreen({
     office_commuter: "💼",
     school_admin: "🏫",
   };
+
+  // Context-aware fallback personalized guidance
+  const defaultPersonalizedAction = (() => {
+    const norm = (profile || "").toLowerCase();
+    const isCleanAir = currentPm25 <= 30; // CPCB Good / Low Risk
+    const isModerateAir = currentPm25 > 30 && currentPm25 <= 60;
+
+    if (isCleanAir) {
+      if (norm.includes("runner") || norm.includes("athlete")) {
+        return `Great air quality! Ideal conditions for your outdoor run or training session today.`;
+      }
+      if (norm.includes("delivery") || norm.includes("rider")) {
+        return `Clear road conditions with low ambient dust. Enjoy smooth riding conditions.`;
+      }
+      if (norm.includes("parent")) {
+        return `Air quality is clean and healthy. Safe for children to play outdoors and engage in sports.`;
+      }
+      if (norm.includes("asthma") || norm.includes("respiratory")) {
+        return `Air quality is in the safe zone. Safe for outdoor errands with minimal trigger risk.`;
+      }
+      return `Air quality is clean and safe. Excellent conditions for all regular outdoor activities.`;
+    }
+
+    if (isModerateAir) {
+      if (norm.includes("asthma") || norm.includes("respiratory")) {
+        return `Moderate air quality. Keep prescribed rescue inhaler accessible during extended outings.`;
+      }
+      if (norm.includes("runner") || norm.includes("athlete")) {
+        return `Air quality is acceptable for outdoor workouts. Sensitive runners may prefer early sessions.`;
+      }
+      if (norm.includes("delivery") || norm.includes("rider")) {
+        return `Moderate traffic exposure. A light mask is recommended during dense evening traffic hours.`;
+      }
+      return `Air quality is moderate. Generally safe for regular outdoor activities without heavy precautions.`;
+    }
+
+    // High / Very High Pollution
+    if (norm.includes("asthma") || norm.includes("respiratory")) {
+      return `Keep prescribed rescue inhaler on hand and minimize outdoor exposure during peak pollution hours.`;
+    }
+    if (norm.includes("runner") || norm.includes("athlete")) {
+      return `Elevated particulate surge expected. Complete runs before peak hours or transition to indoor cardio.`;
+    }
+    if (norm.includes("delivery") || norm.includes("rider")) {
+      return `Equip sealed N95 particulate respirator along traffic arterial corridors and schedule indoor hub pauses.`;
+    }
+    if (norm.includes("parent")) {
+      return `Keep children indoors for games and study sessions during the peak evening exposure window.`;
+    }
+    if (norm.includes("commuter")) {
+      return `Close vehicle windows with cabin air recirculation enabled prior to peak congestion corridors.`;
+    }
+    return `Air quality is expected to decline this evening. Consider finishing outdoor errands before peak hours.`;
+  })();
+
+  const recommendedText = forecastData?.recommendedAction || defaultPersonalizedAction;
 
   return (
     <div className="flex-1 flex flex-col px-4 pt-2 pb-6 space-y-4 overflow-y-auto no-scrollbar">
@@ -318,17 +394,23 @@ export default function HomeScreen({
 
         {/* 4-Column Timeline */}
         <div className="grid grid-cols-4 gap-2 py-1 text-center divide-x divide-slate-100">
-          {timeline.map((item, idx) => (
-            <div key={idx} className="flex flex-col items-center space-y-1">
-              <span className="text-[11px] text-slate-400 font-medium">
-                {item.time}
-              </span>
-              <span className="text-base font-extrabold text-slate-800">
-                {item.pm25}
-              </span>
-              <span className={`w-2 h-2 rounded-full ${item.dotColor} mt-0.5`} />
-            </div>
-          ))}
+          {timeline.map((item, idx) => {
+            const itemAqi = calculateAQI(item.pm25);
+            return (
+              <div key={idx} className="flex flex-col items-center space-y-0.5">
+                <span className="text-[11px] text-slate-400 font-medium">
+                  {item.time}
+                </span>
+                <span className="text-sm font-extrabold text-slate-800">
+                  {item.pm25} µg
+                </span>
+                <span className="text-[10px] font-bold text-blue-600">
+                  AQI {itemAqi.aqi}
+                </span>
+                <span className={`w-2 h-2 rounded-full ${item.dotColor} mt-0.5`} />
+              </div>
+            );
+          })}
         </div>
 
         {/* "View Details ->" Button */}
@@ -339,6 +421,62 @@ export default function HomeScreen({
           <span>View Details</span>
           <ChevronRight className="w-4 h-4" />
         </button>
+      </div>
+
+      {/* AI Copilot Recommended Action Card (Prominent Main Dashboard Early-Warning Safeguard) */}
+      <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-50/95 via-teal-50/60 to-emerald-50/90 border border-emerald-200/90 shadow-sm relative overflow-hidden space-y-3">
+        <div className="absolute -top-6 -right-6 w-24 h-24 bg-emerald-400/10 rounded-full blur-xl pointer-events-none" />
+
+        {/* Card Header: Robot/Shield Icon, Title & Personalized User Badge */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm shadow-emerald-600/30">
+              <Bot className="w-4.5 h-4.5 stroke-[2.2]" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-emerald-950">
+                Recommended Action
+              </h3>
+              <p className="text-[10px] text-emerald-700 font-medium">
+                AI Copilot early-warning safeguard
+              </p>
+            </div>
+          </div>
+
+          {/* User personalization badge */}
+          <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-100/90 border border-emerald-300/60 text-emerald-900 text-[10px] font-bold shadow-2xs">
+            <span>{userProfile?.avatar || profileIcons[profile] || "👤"}</span>
+            <span className="truncate max-w-[110px]">{activeUserName}</span>
+          </div>
+        </div>
+
+        {/* Dynamic Gemini 2.5 LLM Recommendation Text */}
+        <div className="p-3 rounded-xl bg-white/85 border border-emerald-200/80 shadow-2xs">
+          <p className="text-xs sm:text-sm text-emerald-950 font-semibold leading-relaxed">
+            {recommendedText}
+          </p>
+        </div>
+
+        {/* Context metadata pills + link to Why */}
+        <div className="flex items-center justify-between pt-0.5 text-[10px]">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="px-2 py-0.5 rounded-md bg-emerald-100/70 text-emerald-800 font-semibold border border-emerald-200/60 flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3 text-emerald-600 inline" />
+              <span>{primarySafeguard}</span>
+            </span>
+            <span className="text-emerald-700 font-medium">
+              Window: {forecastData?.riskWindow || "Next 3h"}
+            </span>
+          </div>
+
+          <button
+            onClick={onOpenWhy}
+            className="font-bold text-emerald-800 hover:text-emerald-950 flex items-center gap-0.5 cursor-pointer ml-auto transition-colors"
+          >
+            <span>Why this advice?</span>
+            <ChevronRight className="w-3 h-3 stroke-[2.5]" />
+          </button>
+        </div>
       </div>
 
       {/* Card 3: "Why This Forecast?" Quick Teaser */}

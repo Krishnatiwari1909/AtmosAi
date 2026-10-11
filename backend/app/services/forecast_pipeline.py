@@ -1,46 +1,34 @@
+
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.services.ml_predictor import predict_forecast
 from app.services.historical_features import build_hourly_features
 
 
-def _resolve_ml_root():
-    candidates = [
-        Path(__file__).resolve().parents[3] / "ml-team-repo" / "ml",
-        Path(__file__).resolve().parents[2] / "ml-team-repo" / "ml",
-        Path("/app/ml-team-repo/ml"),
-        Path.cwd() / "ml-team-repo" / "ml",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return candidates[0]
-
-ML_ROOT = _resolve_ml_root()
+ML_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "ml-team-repo" / "ml"
 
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
 
-from ingest import fetch_current_telemetry, fetch_telemetry_by_coords
+from ingest import fetch_current_telemetry
 
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
-def _build_features_and_predict(telemetry: dict, default_location: str) -> dict:
-    """Extract 15 model features from telemetry dict and execute LightGBM inference."""
-    tz = telemetry.get("tz") or IST
+async def generate_live_forecast(location: str, lat: float = None, lon: float = None) -> dict:
+    """Build all 15 model features and generate a live forecast."""
+
+    telemetry = await fetch_current_telemetry(location, lat, lon)
 
     historical_features = build_hourly_features(
-        telemetry["hourly_observations"],
-        tz=tz,
+        telemetry["hourly_observations"]
     )
 
-    now = datetime.now(tz)
+    now = datetime.now(IST)
     hour = now.hour
     day_of_week = now.weekday()
 
@@ -97,42 +85,15 @@ def _build_features_and_predict(telemetry: dict, default_location: str) -> dict:
     ]
 
     if set(features) != set(expected_features):
-        raise ValueError("The generated model features do not match expected schema.")
+        raise ValueError("The generated model features do not match.")
 
     result = predict_forecast(features)
 
     return {
         **result,
-        "location": telemetry.get("location") or default_location,
-        "coordinates": telemetry.get("coordinates"),
-        "is_custom_coordinates": telemetry.get("is_custom_coordinates", False),
+        "location": location,
         "prediction_source": "LightGBM",
         "telemetry_source": telemetry["source"],
         "historical_data_source": telemetry["hourly_source"],
-        "weather_source": telemetry.get("weather_source", "Open-Meteo"),
         "features_used": features,
-        "current_observations": {
-            "pm25": telemetry.get("pm25"),
-            "pm10": telemetry.get("pm10"),
-            "temperature": telemetry.get("temperature"),
-            "humidity": telemetry.get("humidity"),
-            "wind_speed": telemetry.get("wind_speed"),
-            "wind_direction": telemetry.get("wind_direction"),
-        },
     }
-
-
-async def generate_live_forecast_by_coords(
-    lat: float,
-    lon: float,
-    location_name: Optional[str] = None,
-) -> dict:
-    """Generate a live ML forecast based on geographic coordinates."""
-    telemetry = await fetch_telemetry_by_coords(lat, lon, location_name, is_custom_coordinates=True)
-    return _build_features_and_predict(telemetry, default_location=f"{lat:.2f}°, {lon:.2f}°")
-
-
-async def generate_live_forecast(location: str) -> dict:
-    """Build all 15 model features and generate a live forecast for a named location."""
-    telemetry = await fetch_current_telemetry(location)
-    return _build_features_and_predict(telemetry, default_location=location)

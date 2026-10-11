@@ -14,38 +14,23 @@ def get_profiles():
         "profiles": [
             {
                 "id": "general",
-                "name": "General Public",
-                "description": "Standard precautions and advisory"
+                "name": "General Public"
             },
             {
                 "id": "parent",
-                "name": "Parent / Guardian",
-                "description": "Children playtime and outdoor exposure protection"
+                "name": "Parent"
             },
             {
                 "id": "delivery_rider",
-                "name": "Delivery Rider",
-                "description": "High-mileage route and shift scheduling advice"
+                "name": "Delivery Rider"
             },
             {
                 "id": "asthma_patient",
-                "name": "Respiratory Sensitive",
-                "description": "Asthma and pulmonary vulnerability safeguards"
+                "name": "Respiratory Sensitive"
             },
             {
                 "id": "runner",
-                "name": "Runner / Athlete",
-                "description": "Endurance training and workout timing"
-            },
-            {
-                "id": "office_commuter",
-                "name": "Office Commuter",
-                "description": "Rush-hour transit and traffic exposure windows"
-            },
-            {
-                "id": "school_admin",
-                "name": "School Administrator",
-                "description": "Recess, sports grounds and bus queue planning"
+                "name": "Runner"
             }
         ]
     }

@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Navigation,
 } from "lucide-react";
+import { calculateAQI } from "../../utils/calculateAQI";
 
 export default function ForecastScreen({
   location = "Bengaluru",
@@ -26,12 +27,21 @@ export default function ForecastScreen({
     forecastData?.telemetrySource ||
     (isGps ? "Open-Meteo Air Quality (Live CAMS model/observations)" : "Open-Meteo");
 
-  const timeline = forecastData?.projectionTimeline || [
-    { time: "Now", pm25: 82, aqi: 142, level: "Poor", color: "#F97316", dotColor: "bg-amber-500" },
-    { time: "+1h", pm25: 96, aqi: 160, level: "Poor", color: "#F97316", dotColor: "bg-amber-500" },
-    { time: "+2h", pm25: 118, aqi: 185, level: "Unhealthy", color: "#EF4444", dotColor: "bg-red-500" },
-    { time: "+3h", pm25: 137, aqi: 210, level: "Unhealthy", color: "#EF4444", dotColor: "bg-red-500" },
+  const rawTimeline = forecastData?.projectionTimeline || [
+    { time: "Now", pm25: 82, dotColor: "bg-amber-500" },
+    { time: "+1h", pm25: 96, dotColor: "bg-amber-500" },
+    { time: "+2h", pm25: 118, dotColor: "bg-orange-500" },
+    { time: "+3h", pm25: 137, dotColor: "bg-red-500" },
   ];
+
+  const timeline = rawTimeline.map((item) => {
+    const cpcb = calculateAQI(item.pm25);
+    return {
+      ...item,
+      aqi: cpcb.aqi,
+      level: cpcb.category,
+    };
+  });
 
   const profileDisplay = {
     runner: "Runner",
@@ -295,12 +305,17 @@ export default function ForecastScreen({
         <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0 mt-0.5">
           <Footprints className="w-5 h-5 stroke-[2.2]" />
         </div>
-        <div className="space-y-0.5">
-          <h3 className="text-xs font-bold text-emerald-900">
-            Recommended Action
-          </h3>
-          <p className="text-xs text-emerald-800/90 leading-relaxed font-medium">
-            Avoid outdoor running between 6 PM – 9 PM. Consider an indoor workout instead.
+        <div className="space-y-0.5 flex-1">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-emerald-900">
+              Recommended Action
+            </h3>
+            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-md">
+              AI Copilot
+            </span>
+          </div>
+          <p className="text-xs text-emerald-800/90 leading-relaxed font-medium pt-1">
+            {forecastData?.recommendedAction || "Avoid outdoor running between 6 PM – 9 PM. Consider an indoor workout instead."}
           </p>
         </div>
       </div>

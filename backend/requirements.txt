@@ -152,9 +152,3 @@ wrapt==2.2.2
 xgboost==3.3.0
 xxhash==3.8.1
 zstandard==0.25.0
-lightgbm>=4.3.0
-joblib>=1.4.0
-scikit-learn>=1.4.0
-pandas>=2.2.0
-numpy>=1.26.0
-python-dotenv>=1.0.0

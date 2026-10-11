@@ -12,4 +12,4 @@ __pycache__/
 *.py[cod]
 node_modules/
 dist/
-build/
+howtostart.txt

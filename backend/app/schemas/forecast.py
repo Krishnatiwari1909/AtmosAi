@@ -1,19 +1,22 @@
+from typing import List, Optional
 from pydantic import BaseModel
-from typing import Optional
 
+
+class ForecastPoint(BaseModel):
+    label: str
+    pm25: float
+    aqi: int
+    level: str
+
+class Factor(BaseModel):
+    title: str
+    description: str
+    icon: Optional[str] = None
 
 class ForecastResponse(BaseModel):
-    location: str
-    profile: str
-
-    current_pm25: float
-    predicted_pm25: float
-
     risk_level: str
-
-    forecast_start: str
-    forecast_end: str
-
-    confidence: Optional[float] = None
-
+    summary: str
+    points: List[ForecastPoint]
+    explanation: str
+    factors: List[Factor]
     recommended_action: str

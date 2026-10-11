@@ -1,5 +1,5 @@
 import React from "react";
-import { Smartphone, Monitor, Sparkles, RefreshCw } from "lucide-react";
+import { Smartphone, Monitor, Sparkles, RefreshCw, X } from "lucide-react";
 
 export default function ScreenSwitcherBar({
   currentScreen,
@@ -10,6 +10,7 @@ export default function ScreenSwitcherBar({
   onToggleDataSourceMode,
   onRefresh,
   isRefreshing,
+  onClose,
 }) {
   const screens = [
     { id: "home", label: "1. Home" },
@@ -107,6 +108,16 @@ export default function ScreenSwitcherBar({
               </>
             )}
           </button>
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors focus:outline-none ml-1"
+              title="Hide Dev Bar (Ctrl+D / Alt+M)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
     </aside>

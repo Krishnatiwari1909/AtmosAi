@@ -1,6 +1,8 @@
 
-import boto3
+from dotenv import load_dotenv
+load_dotenv()
 
+import boto3
 from app.config import settings
 
 
@@ -15,25 +17,43 @@ def get_dynamodb():
         return None
 
     if _dynamodb is None:
-        try:
-            _dynamodb = boto3.resource(
-                "dynamodb",
-                region_name=settings.aws_region,
-            )
-        except Exception:
-            _dynamodb = None
+        _dynamodb = boto3.resource(
+            "dynamodb",
+            region_name=settings.aws_region,
+        )
 
     return _dynamodb
 
 
 def get_telemetry_table():
-    """Return the telemetry table."""
+    """Return the telemetry table, ensuring it exists in DynamoDB."""
     dynamodb = get_dynamodb()
 
     if dynamodb is None:
         return None
 
-    return dynamodb.Table(settings.dynamodb_telemetry_table)
+    table = dynamodb.Table(settings.dynamodb_telemetry_table)
+    try:
+        table.load()
+    except Exception:
+        try:
+            table = dynamodb.create_table(
+                TableName=settings.dynamodb_telemetry_table,
+                KeySchema=[
+                    {"AttributeName": "node_id", "KeyType": "HASH"},
+                    {"AttributeName": "timestamp", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": "node_id", "AttributeType": "S"},
+                    {"AttributeName": "timestamp", "AttributeType": "S"},
+                ],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            table.wait_until_exists()
+        except Exception:
+            pass
+
+    return table
 
 def get_recent_telemetry(node_id: str, limit: int = 500):
     """Retrieve the most recent telemetry records for a node."""
