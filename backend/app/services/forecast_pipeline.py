@@ -8,7 +8,8 @@ from app.services.ml_predictor import predict_forecast
 from app.services.historical_features import build_hourly_features
 
 
-ML_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "ml-team-repo" / "ml"
+ml_base = Path(__file__).resolve().parent.parent.parent.parent / "ml"
+ML_ROOT = (ml_base / "ml") if (ml_base / "ml").exists() else ml_base
 
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))

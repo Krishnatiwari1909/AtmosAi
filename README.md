@@ -25,12 +25,12 @@ AtmosAi/
 │   ├── requirements.txt      # Backend dependencies
 │   └── simulate_telemetry.py # Backend test script
 │
-├── ml-team-repo/             # Core Machine Learning & AI Intelligence Engine
+├── ml/                       # Core Machine Learning & AI Intelligence Engine
 │   ├── ml/
 │   │   ├── models/           
 │   │   │   └── model.joblib  # Trained LightGBM artifact
 │   │   ├── accuracy.json     # Backtesting evaluation metrics
-│   │   ├── bedrock_service.py# Claude Sonnet 5 integration & fallback templates
+│   │   ├── bedrock_service.py# Gemini AI integration & fallback guidance
 │   │   ├── features.py       # Data schema and feature engineering
 │   │   ├── ingest.py         # Open-Meteo / OpenAQ API data fetcher
 │   │   ├── predict.py        # ML inference engine
@@ -61,7 +61,7 @@ export AWS_DEFAULT_REGION="us-east-1"
 To simulate live hardware sensors broadcasting localized Bengaluru telemetry:
 
 Bash
-cd ml-team-repo
+cd ml
 python simulator/sensor_simulator.py
 👥 Team TechinX
 Krishna: 

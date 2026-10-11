@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
 # Set pythonpath
-ENV PYTHONPATH="/app:/app/ml-team-repo/ml:${PYTHONPATH}"
+ENV PYTHONPATH="/app:/app/ml/ml:/app/ml:${PYTHONPATH}"
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 

@@ -4,8 +4,9 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.forecast_pipeline import generate_live_forecast
 from app.services.aqi_calculator import calculate_aqi
 
-# Ensure access to the ML team's repository and reload AI guidance service
-ML_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "ml-team-repo" / "ml"
+# Ensure access to the ML repository and reload AI guidance service
+ml_base = Path(__file__).resolve().parent.parent.parent.parent / "ml"
+ML_ROOT = (ml_base / "ml") if (ml_base / "ml").exists() else ml_base
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
 import bedrock_service

@@ -20,10 +20,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 
 # Copy ML intelligence engine, model weights, and ingestion scripts
-COPY ml-team-repo ./ml-team-repo
+COPY ml ./ml
 
 # Configure environment variables
-ENV PYTHONPATH="/app:/app/ml-team-repo/ml:${PYTHONPATH}"
+ENV PYTHONPATH="/app:/app/ml/ml:/app/ml:${PYTHONPATH}"
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 
