@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import MobileStatusBar from "./components/ui/MobileStatusBar";
 import BottomNav from "./components/ui/BottomNav";
 import ScreenSwitcherBar from "./components/ui/ScreenSwitcherBar";
@@ -21,7 +21,9 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import { usePWA } from "./hooks/usePWA";
 import {
   fetchLiveForecast,
-  fetchLiveForecastByCoords,
+  fetchAlerts,
+  fetchAccuracy,
+  fetchHealth,
 } from "./api/atmosApi";
 import { MOCK_FORECAST_DATA, getAqiAndLevel } from "./data/mockData";
 
@@ -38,7 +40,7 @@ function AppContent() {
         if (parsed?.onboarded) return "home";
         return "onboarding";
       }
-    } catch {}
+    } catch { }
     return "login";
   });
 
@@ -50,16 +52,11 @@ function AppContent() {
   const [selectedLocation, setSelectedLocation] = useState(
     user?.details?.baseLocation || "Bengaluru"
   );
-  const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
-  const [currentCoords, setCurrentCoords] = useState(null); // { lat, lon, accuracy, locality }
-  const [forecastError, setForecastError] = useState(null);
-
   const [selectedProfile, setSelectedProfile] = useState(
     user?.role || "runner"
   );
   const [forecastData, setForecastData] = useState(MOCK_FORECAST_DATA);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const abortControllerRef = useRef(null);
 
   // PWA Hook
   const { isInstallable, isInstalled, installPWA } = usePWA();
@@ -71,7 +68,6 @@ function AppContent() {
     }
     if (user?.details?.baseLocation) {
       setSelectedLocation(user.details.baseLocation);
-      setIsUsingCurrentLocation(false);
     }
   }, [user?.role, user?.details?.baseLocation]);
 
@@ -104,196 +100,88 @@ function AppContent() {
     setCurrentScreen(screenId);
   };
 
-  // Helper to transform backend forecast response into frontend state model
-  const transformForecastData = useCallback(
-    (data, isGpsMode, coords, locName, prof) => {
-      const curPm = Math.round(
-        data.features_used?.pm25_current || data.current_observations?.pm25 || 39
-      );
-      const predPm = Math.round(data.predicted_pm25 || curPm * 1.15);
-      const curAqiInfo = getAqiAndLevel(curPm);
-
-      const step1 = Math.round(curPm + (predPm - curPm) * 0.33);
-      const step2 = Math.round(curPm + (predPm - curPm) * 0.66);
-
-      const isSurge = data.risk === "VERY_HIGH" || data.risk === "HIGH" || curPm >= 90;
-      const isModerate = data.risk === "MODERATE" || (curPm >= 50 && curPm < 90);
-
-      const resolvedName = isGpsMode
-        ? data.location || coords?.locality || "Current Location (GPS)"
-        : data.location || locName;
-
-      return {
-        location: resolvedName,
-        isCurrentLocation: isGpsMode,
-        coordinates: coords ? { lat: coords.lat, lon: coords.lon } : data.coordinates || null,
-        accuracy: coords?.accuracy || null,
-        profile: prof,
-        currentAqi: curAqiInfo.aqi,
-        currentPm25: curPm,
-        currentLevel: curAqiInfo.level,
-        updatedTime: isGpsMode ? "Live GPS • Open-Meteo" : "Live Open-Meteo",
-        telemetrySource:
-          data.telemetry_source ||
-          (isGpsMode ? "Open-Meteo Air Quality (Live CAMS model/observations)" : "Open-Meteo"),
-        weatherSource: data.weather_source || "Open-Meteo",
-        predictionSource: data.prediction_source || "LightGBM ML Model",
-        riskLevel: isSurge ? "High Risk" : isModerate ? "Moderate Risk" : "Low Risk",
-        riskDescription:
-          data.explanation?.summary ||
-          (isSurge
-            ? `Air quality is likely to worsen over the next 3 hours near ${resolvedName}.`
-            : `Air quality is projected to remain stable near ${resolvedName}.`),
-        riskWindow: data.forecast_window || "Next 3 Hours",
-        projectionTimeline: [
-          {
-            time: "Now",
-            pm25: curPm,
-            aqi: curAqiInfo.aqi,
-            level: curAqiInfo.level,
-            dotColor: curAqiInfo.dotColor,
-          },
-          {
-            time: "+1h",
-            pm25: step1,
-            aqi: getAqiAndLevel(step1).aqi,
-            level: getAqiAndLevel(step1).level,
-            dotColor: getAqiAndLevel(step1).dotColor,
-          },
-          {
-            time: "+2h",
-            pm25: step2,
-            aqi: getAqiAndLevel(step2).aqi,
-            level: getAqiAndLevel(step2).level,
-            dotColor: getAqiAndLevel(step2).dotColor,
-          },
-          {
-            time: "+3h",
-            pm25: predPm,
-            aqi: getAqiAndLevel(predPm).aqi,
-            level: getAqiAndLevel(predPm).level,
-            dotColor: getAqiAndLevel(predPm).dotColor,
-          },
-        ],
-        recommendedAction:
-          data.explanation?.action ||
-          "Maintain regular hydration and plan workouts during cleaner daylight hours.",
-      };
-    },
-    []
-  );
-
   // Load and refresh live data
   const loadData = useCallback(async () => {
     if (dataSourceMode === "demo") {
       setForecastData(MOCK_FORECAST_DATA);
-      setForecastError(null);
       return;
     }
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
     setIsRefreshing(true);
-    setForecastError(null);
-
     try {
-      let data;
-      if (
-        isUsingCurrentLocation &&
-        currentCoords &&
-        currentCoords.lat !== undefined &&
-        currentCoords.lon !== undefined
-      ) {
-        data = await fetchLiveForecastByCoords(
-          currentCoords.lat,
-          currentCoords.lon,
-          selectedProfile,
-          controller.signal
-        );
-      } else {
-        const locParam = selectedLocation.toLowerCase().replace(/\s+/g, "_");
-        data = await fetchLiveForecast(locParam, selectedProfile, controller.signal);
-      }
+      const locParam = selectedLocation.toLowerCase().replace(/\s+/g, "_");
+      const data = await fetchLiveForecast(locParam, selectedProfile);
 
       if (data && data.predicted_pm25 !== undefined) {
-        const parsed = transformForecastData(
-          data,
-          isUsingCurrentLocation,
-          currentCoords,
-          selectedLocation,
-          selectedProfile
-        );
-        setForecastData(parsed);
+        const curPm = Math.round(data.features_used?.pm25_current || 39);
+        const predPm = Math.round(data.predicted_pm25 || curPm * 1.15);
+        const curAqiInfo = getAqiAndLevel(curPm);
+
+        const step1 = Math.round(curPm + (predPm - curPm) * 0.33);
+        const step2 = Math.round(curPm + (predPm - curPm) * 0.66);
+
+        const isSurge = data.risk === "VERY_HIGH" || data.risk === "HIGH" || curPm >= 90;
+        const isModerate = data.risk === "MODERATE" || (curPm >= 50 && curPm < 90);
+
+        setForecastData({
+          location: selectedLocation,
+          profile: selectedProfile,
+          currentAqi: curAqiInfo.aqi,
+          currentPm25: curPm,
+          currentLevel: curAqiInfo.level,
+          updatedTime: "Live Open-Meteo",
+          riskLevel: isSurge ? "High Risk" : isModerate ? "Moderate Risk" : "Low Risk",
+          riskDescription:
+            data.explanation?.summary ||
+            (isSurge
+              ? "Air quality is likely to worsen over the next 3 hours."
+              : "Air quality is projected to remain stable."),
+          riskWindow: data.forecast_window || "Next 3 Hours",
+          projectionTimeline: [
+            {
+              time: "Now",
+              pm25: curPm,
+              aqi: curAqiInfo.aqi,
+              level: curAqiInfo.level,
+              dotColor: curAqiInfo.dotColor,
+            },
+            {
+              time: "+1h",
+              pm25: step1,
+              aqi: getAqiAndLevel(step1).aqi,
+              level: getAqiAndLevel(step1).level,
+              dotColor: getAqiAndLevel(step1).dotColor,
+            },
+            {
+              time: "+2h",
+              pm25: step2,
+              aqi: getAqiAndLevel(step2).aqi,
+              level: getAqiAndLevel(step2).level,
+              dotColor: getAqiAndLevel(step2).dotColor,
+            },
+            {
+              time: "+3h",
+              pm25: predPm,
+              aqi: getAqiAndLevel(predPm).aqi,
+              level: getAqiAndLevel(predPm).level,
+              dotColor: getAqiAndLevel(predPm).dotColor,
+            },
+          ],
+          recommendedAction:
+            data.explanation?.action ||
+            "Maintain regular hydration and plan workouts during cleaner daylight hours.",
+        });
       }
-    } catch (err) {
-      if (err.name === "AbortError") return;
-      console.warn("Forecast load warning:", err.message);
-      setForecastError(err.message || "Failed to load live forecast data.");
+    } catch {
+      // Retain mockData if offline
     } finally {
       setIsRefreshing(false);
     }
-  }, [
-    dataSourceMode,
-    isUsingCurrentLocation,
-    currentCoords,
-    selectedLocation,
-    selectedProfile,
-    transformForecastData,
-  ]);
+  }, [selectedLocation, selectedProfile, dataSourceMode]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  // Handler for selecting Current Location (GPS)
-  const handleSelectCurrentLocation = useCallback(
-    async ({ lat, lon, accuracy }) => {
-      setIsUsingCurrentLocation(true);
-      const initialCoords = { lat, lon, accuracy, locality: "Locating..." };
-      setCurrentCoords(initialCoords);
-      setForecastError(null);
-
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      setIsRefreshing(true);
-      try {
-        const data = await fetchLiveForecastByCoords(lat, lon, selectedProfile, controller.signal);
-        const resolvedName = data.location || `${lat.toFixed(2)}°, ${lon.toFixed(2)}°`;
-        const updatedCoords = { lat, lon, accuracy, locality: resolvedName };
-
-        setCurrentCoords(updatedCoords);
-        setSelectedLocation(resolvedName);
-
-        if (data && data.predicted_pm25 !== undefined) {
-          const parsed = transformForecastData(data, true, updatedCoords, resolvedName, selectedProfile);
-          setForecastData(parsed);
-        }
-        return data;
-      } catch (err) {
-        if (err.name === "AbortError") return null;
-        setForecastError(err.message || "Could not retrieve live forecast for coordinates.");
-        throw err;
-      } finally {
-        setIsRefreshing(false);
-      }
-    },
-    [selectedProfile, transformForecastData]
-  );
-
-  // Handler for manual location selection
-  const handleSelectManualLocation = useCallback((newLocation) => {
-    setIsUsingCurrentLocation(false);
-    setSelectedLocation(newLocation);
-    setForecastError(null);
-  }, []);
 
   // Bottom navigation visibility and active tab mapping
   const showBottomNav = ["home", "map", "stats", "alerts", "profile", "about"].includes(
@@ -326,11 +214,10 @@ function AppContent() {
       {/* Main App Container */}
       <div className="flex-1 flex items-center justify-center p-0 sm:p-4 md:p-6">
         <main
-          className={`${
-            isDeviceFrame
+          className={`${isDeviceFrame
               ? "mobile-device-frame"
               : "w-full max-w-xl min-h-[90vh] bg-slate-50 sm:rounded-3xl shadow-2xl border border-slate-700/50 flex flex-col overflow-hidden"
-          } transition-all duration-300 relative`}
+            } transition-all duration-300 relative`}
         >
           {/* Mobile Top Status Bar */}
           <MobileStatusBar />
@@ -353,10 +240,6 @@ function AppContent() {
                 forecastData={forecastData}
                 isAuthenticated={isAuthenticated}
                 isGuest={isGuest}
-                isUsingCurrentLocation={isUsingCurrentLocation}
-                currentCoords={currentCoords}
-                forecastError={forecastError}
-                onRetryForecast={loadData}
               />
             )}
 
@@ -417,8 +300,6 @@ function AppContent() {
                 onBack={popScreen}
                 onOpenWhy={() => pushScreen("why")}
                 forecastData={forecastData}
-                isUsingCurrentLocation={isUsingCurrentLocation}
-                currentCoords={currentCoords}
               />
             )}
 
@@ -427,13 +308,9 @@ function AppContent() {
             {currentScreen === "map" && (
               <MapScreen
                 onSelectLocationNode={(node) => {
-                  handleSelectManualLocation(node.shortName);
+                  setSelectedLocation(node.shortName);
                   pushScreen("home");
                 }}
-                isUsingCurrentLocation={isUsingCurrentLocation}
-                currentCoords={currentCoords}
-                locationName={selectedLocation}
-                onUseCurrentLocation={() => pushScreen("location")}
               />
             )}
 
@@ -456,11 +333,8 @@ function AppContent() {
             {currentScreen === "location" && (
               <LocationScreen
                 selectedLocation={selectedLocation}
-                onSelectLocation={handleSelectManualLocation}
+                onSelectLocation={setSelectedLocation}
                 onBack={popScreen}
-                isUsingCurrentLocation={isUsingCurrentLocation}
-                currentCoords={currentCoords}
-                onSelectCurrentLocation={handleSelectCurrentLocation}
               />
             )}
 
